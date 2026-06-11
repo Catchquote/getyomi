@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../hooks/useAuth';
 
 const TITLES = {
   '/dashboard':  'Dashboard',
@@ -32,9 +33,20 @@ function MoonIcon() {
   );
 }
 
+function SignOutIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
 export default function TopBar() {
   const { pathname } = useLocation();
   const { theme, toggle } = useTheme();
+  const { signOut } = useAuth();
   const title = TITLES[pathname] || 'Yomi';
 
   return (
@@ -55,10 +67,16 @@ export default function TopBar() {
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </button>
 
-        {/* Avatar */}
-        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-          <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>T</span>
-        </div>
+        {/* Sign out */}
+        <button
+          onClick={signOut}
+          title="Sign out"
+          style={{ width: 34, height: 34, borderRadius: 8, border: '1px solid var(--bdr)', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t2)', transition: 'background 0.15s, color 0.15s' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--hov)'; e.currentTarget.style.color = 'var(--t1)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t2)'; }}
+        >
+          <SignOutIcon />
+        </button>
       </div>
     </header>
   );

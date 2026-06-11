@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { parseMT5CSV } from '../lib/parseCSV';
+import { useAuth } from '../hooks/useAuth';
+import { validateCSVFile, checkImportRateLimit, recordImport } from '../lib/validation';
+import { fetchExistingTickets, insertTrades, fetchTradeStats } from '../api/trades';
 import { supabase } from '../lib/supabase';
 
 function toNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
@@ -38,6 +41,7 @@ function StatPill({ label, value, valueStyle }) {
 
 export default function Import() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const fileRef = useRef(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -50,17 +54,14 @@ export default function Import() {
 
   // Load current DB summary
   useEffect(() => {
-    supabase.from('trades').select('profit, open_time').then(({ data }) => {
-      if (!data?.length) return;
-      const profits = data.map((r) => toNum(r.profit));
-      const total   = profits.reduce((s, n) => s + n, 0);
-      const dates   = data.map((r) => r.open_time).filter(Boolean).sort();
-      setDbStats({ count: data.length, total, from: dates[0], to: dates[dates.length - 1] });
-    });
-  }, [savedCount]);
+    if (!user?.id) return;
+    fetchTradeStats(user.id).then((stats) => { if (stats) setDbStats(stats); }).catch(() => {});
+  }, [savedCount, user?.id]);
 
   const handleFile = useCallback((file) => {
     if (!file) return;
+    const fileErr = validateCSVFile(file);
+    if (fileErr) { setParseErr(fileErr); return; }
     setParseErr(null); setTrades(null); setSavedCount(null); setSaveErr(null);
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -76,31 +77,68 @@ export default function Import() {
   const onDrop = useCallback((e) => {
     e.preventDefault(); setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    file?.name.endsWith('.csv') ? handleFile(file) : setParseErr('Please drop a .csv file.');
+    if (file) handleFile(file);
   }, [handleFile]);
 
   const handleConfirm = async () => {
     if (!trades?.length) return;
+    if (!user?.id) { setSaveErr('Not signed in — please log out and sign in again.'); return; }
+    const rateCheck = checkImportRateLimit();
+    if (!rateCheck.allowed) { setSaveErr(rateCheck.message); return; }
     setSaving(true); setSaveErr(null);
+    try {
+      // Verify JWT is valid with a live server check before attempting insert
+      const { data: { user: liveUser }, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !liveUser) {
+        setSaveErr('Session expired — please sign out and sign in again.');
+        return;
+      }
 
-    const { data: existing, error: fetchErr } = await supabase.from('trades').select('ticket');
-    if (fetchErr) { setSaveErr('Could not reach Supabase: ' + fetchErr.message); setSaving(false); return; }
+      // Diagnostic: ask the database what it sees for this request
+      const { data: rls, error: rlsErr } = await supabase.rpc('debug_rls');
+      if (rlsErr) {
+        // Function not in DB yet — skip diagnostic, proceed
+      } else {
+        const authUid  = rls?.auth_uid  ?? 'NULL';
+        const jwtSub   = rls?.jwt_sub   ?? '';
+        const role     = rls?.current_role ?? '';
+        if (!rls?.auth_uid) {
+          setSaveErr(
+            `RLS blocked: auth.uid() is NULL in the database.\n` +
+            `DB role: ${role} | jwt_sub: "${jwtSub || 'empty'}"\n` +
+            `Client user.id: ${liveUser.id}\n` +
+            `→ JWT is NOT reaching PostgREST. Sign out, sign in again, then retry.`
+          );
+          return;
+        }
+        if (authUid !== liveUser.id) {
+          setSaveErr(
+            `UID mismatch: DB auth.uid()="${authUid}" but client user.id="${liveUser.id}".\n` +
+            `Sign out, sign in again, then retry.`
+          );
+          return;
+        }
+      }
 
-    const existingTickets = new Set((existing ?? []).map((r) => r.ticket));
-    const newTrades = trades.filter((t) => !existingTickets.has(t.ticket))
-      .map(({ open_date, close_date, open_time, close_time, ...rest }) => ({
-        ...rest,
-        open_time:  open_date?.toISOString()  ?? null,
-        close_time: close_date?.toISOString() ?? null,
-      }));
-
-    if (!newTrades.length) { setSavedCount(0); setSaving(false); return; }
-
-    const { error: insertErr } = await supabase.from('trades').insert(newTrades);
-    if (insertErr) { setSaveErr('Import failed: ' + insertErr.message); setSaving(false); return; }
-
-    setSavedCount(newTrades.length); setSaving(false);
-    setTimeout(() => navigate('/dashboard'), 1400);
+      const existingTickets = await fetchExistingTickets(liveUser.id);
+      const newTrades = trades
+        .filter((t) => !existingTickets.has(t.ticket))
+        .map(({ open_date, close_date, open_time, close_time, ...rest }) => ({
+          ...rest,
+          user_id:    liveUser.id,
+          open_time:  open_date?.toISOString()  ?? null,
+          close_time: close_date?.toISOString() ?? null,
+        }));
+      if (!newTrades.length) { setSavedCount(0); return; }
+      await insertTrades(newTrades);
+      recordImport();
+      setSavedCount(newTrades.length);
+      setTimeout(() => navigate('/dashboard'), 1400);
+    } catch (err) {
+      setSaveErr('Import failed: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const summary = trades ? parseSummary(trades) : null;

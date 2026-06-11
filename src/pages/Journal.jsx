@@ -1,21 +1,12 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../hooks/useAuth';
+import { fetchJournalEntries, upsertJournalEntry } from '../api/journal';
+import { sanitizeText } from '../lib/validation';
 
 /*
-  Required Supabase table — run in SQL editor:
-
-  create table journal_entries (
-    id               uuid default gen_random_uuid() primary key,
-    date             date not null unique,
-    emotion_tags     text[] default '{}',
-    setup_tags       text[] default '{}',
-    went_well        text default '',
-    went_wrong       text default '',
-    rule_tomorrow    text default '',
-    created_at       timestamptz default now()
-  );
-  alter table journal_entries enable row level security;
-  create policy "allow all" on journal_entries for all using (true) with check (true);
+  Required Supabase table — run supabase-setup.sql in your SQL editor.
+  journal_entries must have a user_id column and unique(user_id, date).
 */
 
 const EMOTION_TAGS = ['Calm', 'Focused', 'Anxious', 'Frustrated', 'Overconfident', 'Tired', 'Sharp', 'Hesitant'];
@@ -31,7 +22,7 @@ function TagToggle({ tag, active, onToggle }) {
   return (
     <button
       onClick={() => onToggle(tag)}
-      style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${active ? 'var(--accent)' : 'var(--bdr)'}`, background: active ? 'var(--accent-muted)' : 'transparent', color: active ? 'var(--accent)' : 'var(--t2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s' }}
+      style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${active ? 'var(--accent)' : 'var(--bdr)'}`, background: active ? 'rgba(29,158,117,0.12)' : 'transparent', color: active ? 'var(--accent)' : 'var(--t2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', transition: 'all 0.15s' }}
     >
       {tag}
     </button>
@@ -54,6 +45,9 @@ function TextArea({ label, value, onChange, placeholder, rows = 3 }) {
 }
 
 export default function Journal() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
   const [date, setDate]               = useState(TODAY);
   const [emotionTags, setEmotionTags] = useState([]);
   const [setupTags, setSetupTags]     = useState([]);
@@ -63,21 +57,16 @@ export default function Journal() {
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
   const [saveErr, setSaveErr]         = useState(null);
-  const [entries, setEntries]         = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [tableErr, setTableErr]       = useState(false);
 
-  // Load entries
-  useEffect(() => {
-    supabase.from('journal_entries').select('*').order('date', { ascending: false }).limit(30)
-      .then(({ data, error }) => {
-        if (error) { if (error.code === '42P01') setTableErr(true); setLoading(false); return; }
-        setEntries(data ?? []);
-        setLoading(false);
-      });
-  }, [saved]);
+  const { data: entries = [], isPending: loading, error: queryError } = useQuery({
+    queryKey: ['journal', user?.id],
+    queryFn: () => fetchJournalEntries(user.id),
+    enabled: !!user?.id,
+  });
 
-  // Load entry for selected date
+  const tableErr = queryError?.code === '42P01' || queryError?.message?.includes('does not exist');
+
+  // Populate form when date or entries change
   useEffect(() => {
     const entry = entries.find((e) => e.date === date);
     if (entry) {
@@ -95,29 +84,31 @@ export default function Journal() {
 
   const handleSave = async () => {
     setSaving(true); setSaveErr(null); setSaved(false);
-    const payload = { date, emotion_tags: emotionTags, setup_tags: setupTags, went_well: wentWell, went_wrong: wentWrong, rule_tomorrow: ruleTomorrow };
-    const { error } = await supabase.from('journal_entries').upsert(payload, { onConflict: 'date' });
-    if (error) { setSaveErr(error.message); } else { setSaved(true); setTimeout(() => setSaved(false), 2500); }
-    setSaving(false);
+    try {
+      await upsertJournalEntry({
+        user_id:       user.id,
+        date,
+        emotion_tags:  emotionTags,
+        setup_tags:    setupTags,
+        went_well:     sanitizeText(wentWell),
+        went_wrong:    sanitizeText(wentWrong),
+        rule_tomorrow: sanitizeText(ruleTomorrow),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      queryClient.invalidateQueries({ queryKey: ['journal', user.id] });
+    } catch (err) {
+      setSaveErr(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (tableErr) return (
     <div style={{ maxWidth: 600, margin: '40px auto' }}>
-      <Card style={{ borderColor: 'var(--warn)', background: 'var(--warn-muted)' }}>
+      <Card style={{ borderColor: 'var(--warn)', background: 'rgba(186,117,23,0.06)' }}>
         <p style={{ margin: '0 0 8px', fontWeight: 600, color: 'var(--warn)' }}>Journal table not found</p>
-        <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--t2)' }}>Run this SQL in your Supabase SQL editor to create the journal table:</p>
-        <pre style={{ background: 'var(--surface)', border: '1px solid var(--bdr)', borderRadius: 6, padding: 12, fontSize: 11, color: 'var(--t1)', overflow: 'auto', margin: 0 }}>{`create table journal_entries (
-  id            uuid default gen_random_uuid() primary key,
-  date          date not null unique,
-  emotion_tags  text[] default '{}',
-  setup_tags    text[] default '{}',
-  went_well     text default '',
-  went_wrong    text default '',
-  rule_tomorrow text default '',
-  created_at    timestamptz default now()
-);
-alter table journal_entries enable row level security;
-create policy "allow all" on journal_entries for all using (true) with check (true);`}</pre>
+        <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--t2)' }}>Run <strong>supabase-setup.sql</strong> in your Supabase SQL editor to create the journal table with the correct schema.</p>
       </Card>
     </div>
   );
@@ -152,8 +143,8 @@ create policy "allow all" on journal_entries for all using (true) with check (tr
 
       {/* Text areas */}
       <Card style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <TextArea label="What went well" value={wentWell} onChange={setWentWell} placeholder="Trades I executed well, rules I followed…" />
-        <TextArea label="What went wrong" value={wentWrong} onChange={setWentWrong} placeholder="Mistakes, impulse trades, rule breaks…" />
+        <TextArea label="What went well"    value={wentWell}     onChange={setWentWell}     placeholder="Trades I executed well, rules I followed…" />
+        <TextArea label="What went wrong"   value={wentWrong}    onChange={setWentWrong}    placeholder="Mistakes, impulse trades, rule breaks…" />
         <TextArea label="Rule for tomorrow" value={ruleTomorrow} onChange={setRuleTomorrow} placeholder="One specific rule or intention for tomorrow's session…" rows={2} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 }}>
@@ -163,8 +154,8 @@ create policy "allow all" on journal_entries for all using (true) with check (tr
           >
             {saving ? 'Saving…' : 'Save entry'}
           </button>
-          {saved    && <span style={{ fontSize: 12, color: 'var(--accent)' }}>✓ Saved</span>}
-          {saveErr  && <span style={{ fontSize: 12, color: 'var(--loss)' }}>{saveErr}</span>}
+          {saved   && <span style={{ fontSize: 12, color: 'var(--accent)' }}>✓ Saved</span>}
+          {saveErr && <span style={{ fontSize: 12, color: 'var(--loss)' }}>{saveErr}</span>}
         </div>
       </Card>
 

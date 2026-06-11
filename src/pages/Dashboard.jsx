@@ -1,14 +1,14 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line, BarChart, Bar,
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts';
-import { supabase } from '../lib/supabase';
-import { getHourlyPnl, getEquityCurve, getDrawdownMap, getRevengeTradeIndices, getRollingWinRate, getQualityScores } from '../lib/analytics';
+import { getHourlyPnl, getEquityCurve, getDrawdownMap, getRevengeTradeIndices, getRollingWinRate } from '../lib/analytics';
 import { calcDisciplineScore } from '../lib/scoreEngine';
 import { useTheme } from '../contexts/ThemeContext';
 import { getChartTheme } from '../lib/chartTheme';
+import { useTrades } from '../hooks/useTrades';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,34 +78,8 @@ export default function Dashboard() {
   const { theme } = useTheme();
   const ct = getChartTheme(theme);
 
-  const [trades, setTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    supabase.from('trades').select('*').then(({ data, error: err }) => {
-      if (err) { setError(err.message); setLoading(false); return; }
-      const cleaned = (data ?? []).map((t) => ({
-        ...t,
-        profit:        toNum(t.profit),
-        volume:        toNum(t.volume),
-        open_price:    toNum(t.open_price),
-        close_price:   toNum(t.close_price),
-        duration_mins: toNum(t.duration_mins),
-        sl:            toNum(t.sl),
-        tp:            toNum(t.tp),
-        commission:    toNum(t.commission),
-        swap:          toNum(t.swap),
-      }));
-      const hydrated = cleaned.map((t) => ({
-        ...t,
-        open_date:  t.open_time  ? new Date(t.open_time)  : null,
-        close_date: t.close_time ? new Date(t.close_time) : null,
-      }));
-      setTrades(hydrated);
-      setLoading(false);
-    });
-  }, []);
+  const { data: trades = [], isPending: loading, error: queryError } = useTrades();
+  const error = queryError?.message ?? null;
 
   const analytics = useMemo(() => {
     if (!trades.length) return null;

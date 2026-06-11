@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { supabase } from '../lib/supabase';
 import { calcDisciplineScore } from '../lib/scoreEngine';
+import { useTrades } from '../hooks/useTrades';
 import { useTheme } from '../contexts/ThemeContext';
 import { getChartTheme } from '../lib/chartTheme';
 
@@ -29,23 +29,8 @@ export default function Scorecard() {
   const { theme } = useTheme();
   const ct = getChartTheme(theme);
 
-  const [trades, setTrades] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    supabase.from('trades').select('*').then(({ data, error: err }) => {
-      if (err) { setError(err.message); setLoading(false); return; }
-      const hydrated = (data ?? []).map((t) => ({
-        ...t,
-        profit: toNum(t.profit), volume: toNum(t.volume), sl: toNum(t.sl), duration_mins: toNum(t.duration_mins),
-        open_date:  t.open_time  ? new Date(t.open_time)  : null,
-        close_date: t.close_time ? new Date(t.close_time) : null,
-      }));
-      setTrades(hydrated);
-      setLoading(false);
-    });
-  }, []);
+  const { data: trades = [], isPending: loading, error: queryError } = useTrades();
+  const error = queryError?.message ?? null;
 
   // Group trades by day
   const dailyData = useMemo(() => {
