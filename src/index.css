@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* ── Design tokens ──────────────────────────────────────────────── */
+:root {
+  --accent:        #1D9E75;
+  --accent-hover:  #17875F;
+  --accent-muted:  rgba(29,158,117,0.12);
+  --loss:          #E24B4A;
+  --loss-muted:    rgba(226,75,74,0.12);
+  --warn:          #BA7517;
+  --warn-muted:    rgba(186,117,23,0.12);
+  --radius:        8px;
+  --radius-sm:     6px;
+}
+
+/* Dark theme (default) */
+html, html[data-theme='dark'] {
+  --bg:       #0F1117;
+  --surface:  #1A1D27;
+  --surface2: #1E2130;
+  --hov:      #252838;
+  --bdr:      #2A2D3A;
+  --bdr2:     #3A3D4A;
+  --t1:       #F1F5F9;
+  --t2:       #94A3B8;
+  --t3:       #475569;
+}
+
+/* Light theme */
+html[data-theme='light'] {
+  --bg:       #F4F5F7;
+  --surface:  #FFFFFF;
+  --surface2: #F8FAFC;
+  --hov:      #F1F5F9;
+  --bdr:      #E5E7EB;
+  --bdr2:     #D1D5DB;
+  --t1:       #0F172A;
+  --t2:       #475569;
+  --t3:       #94A3B8;
+}
+
+/* ── Base ───────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { min-height: 100svh; }
+
+/* ── Theme utility classes ──────────────────────────────────────── */
+@layer utilities {
+  .bg-app      { background-color: var(--bg); }
+  .bg-card     { background-color: var(--surface); }
+  .bg-card2    { background-color: var(--surface2); }
+  .bg-hov      { background-color: var(--hov); }
+  .bdr         { border-color: var(--bdr); }
+  .bdr2        { border-color: var(--bdr2); }
+  .t1          { color: var(--t1); }
+  .t2          { color: var(--t2); }
+  .t3          { color: var(--t3); }
+  .c-accent    { color: var(--accent); }
+  .c-loss      { color: var(--loss); }
+  .c-warn      { color: var(--warn); }
+  .bg-accent   { background-color: var(--accent); }
+  .bg-accent-m { background-color: var(--accent-muted); }
+  .bg-loss-m   { background-color: var(--loss-muted); }
+  .bg-warn-m   { background-color: var(--warn-muted); }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bdr2); border-radius: 4px; }
